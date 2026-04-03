@@ -1,0 +1,2 @@
+# ERCOT-UNDERSTANDING
+Helps those new to ERCOT
