@@ -1,0 +1,21 @@
+# ERCOT DART Virtual Trading System
+# Phase 1 dependencies
+
+# Core data
+pandas>=2.1.0
+numpy>=1.26.0
+pyarrow>=14.0.0       # Parquet I/O
+
+# Phase 2 (Probabilistic Forecasting)
+hmmlearn>=0.3.0
+pymc>=5.9.0
+pytensor>=2.18.0
+xgboost>=2.0.0
+scikit-learn>=1.4.0
+
+# Phase 4 (Backtesting)
+vectorbt>=0.26.0
+
+# Dev / testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
