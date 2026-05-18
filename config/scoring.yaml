@@ -1,0 +1,14 @@
+# Composite Score weights (M6 — PRD §M6)
+# composite_h = w1 * directional_conviction + w2 * normalize(spread_magnitude) + w3 * fundamental_alignment
+# Must sum to 1.0. Change requires re-calibration of Kelly thresholds.
+weights:
+  directional_conviction: 0.50   # w1 — P(spread > 0) for INC, P(spread < 0) for DEC
+  spread_magnitude: 0.30         # w2 — |E[spread]| / historical σ(spread) at this hour
+  fundamental_alignment: 0.20   # w3 — binary in v1: 1 if no major restricting outage
+
+# Minimum composite score to generate a bid for any hour.
+# Hours below this threshold are skipped (output: [NULL]).
+min_composite_score: 0.30
+
+# Minimum directional conviction to qualify as an INC or DEC trade.
+min_directional_conviction: 0.55

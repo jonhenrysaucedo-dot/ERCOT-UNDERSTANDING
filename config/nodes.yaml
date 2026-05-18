@@ -1,0 +1,30 @@
+# Target node configuration.
+# DO NOT hard-code the settlement-point name anywhere in src/.
+# All code reads from this file or the TARGET_NODE env var.
+#
+# Action required (Phase 0 open question #1):
+#   Confirm `ercot_settlement_point` by pulling NP4-160-SG Settlement Points
+#   List from ERCOT MIS. Filter RESOURCE_NAME for: QUANTUM, QTUM, SOLACE, IPQ.
+#   Update `confirmed: false` → true once verified.
+
+target_node:
+  working_label: QUANTUM_ESR            # provisional; NOT verified
+  ercot_settlement_point: QUANTUM_ESR   # replace with exact ERCOT name after confirmation
+  confirmed: false                      # set to true after NP4-160-SG lookup
+  settlement_point_type: RN             # Resource Node
+  zone: NORTH                           # primary zone; node borders WEST zone
+  latitude: 33.18                       # Haskell County TX approx centroid
+  longitude: -99.73
+  capacity_mw: 321.79
+  fuel_type: BESS
+  ercot_queue_id: 26INR0309
+  cod_projected: 2026-06-01             # Commercial Operations Date; may slip
+  notes: >
+    IP Quantum BESS LLC — "Solace Storage" project, Haskell County TX.
+    Node straddles the North/West zone boundary; price typically tracks NORTH.
+    Confirm zone affiliation before Phase 1 trading.
+
+# Neighboring nodes used for HMM regime features (shift-factor proxy)
+# Add confirmed names here once NP4-160-SG is pulled.
+reference_hub: HB_NORTH                 # nearest hub for hub-spoke spread
+neighboring_nodes: []
