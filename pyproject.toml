@@ -17,6 +17,9 @@ dependencies = [
     "structlog>=24.1.0",
     # HTTP
     "httpx>=0.27.0",
+    "requests>=2.31.0",
+    # ERCOT live data (open-source, no API key required)
+    "gridstatus>=0.30.0",
     # Regime detection
     "hmmlearn>=0.3.0",
     # GARCH volatility (PRD §M4 non-negotiable)

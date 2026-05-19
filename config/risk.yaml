@@ -3,7 +3,7 @@
 
 # ── Position sizing ───────────────────────────────────────────────────────────
 half_kelly_multiplier: 0.50        # Non-negotiable per PRD §M7 and CLAUDE.md §"Do not skip"
-max_position_mw: 50.0              # TBD: replace with trader's actual capital allocation (PRD §10 Q2)
+max_position_mw: 50.0              # TBD: replace with trader's capital allocation (PRD §10 Q2); node nameplate is 160 MW
 min_tier_mw: 0.1                   # ERCOT minimum offer block
 
 # ── Uncertainty damping ───────────────────────────────────────────────────────

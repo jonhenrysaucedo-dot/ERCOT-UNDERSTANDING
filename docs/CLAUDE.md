@@ -6,7 +6,7 @@ This file is **the first thing Claude Code reads** when working in this reposito
 
 ## What this project is
 
-A daily-DAM bidding system for a single ERCOT resource node (working name `QUANTUM_ESR`, exact ERCOT-registered name to be confirmed — see `config/nodes.yaml`). It produces a 10-tier limit-price bid curve for each of the 24 operating hours of the next day, sized by a Bayesian-Kelly framework over a probabilistic DART-spread forecast.
+A daily-DAM bidding system for a single ERCOT solar resource node — **`RN_QTUM_SLR`** in the West Zone. It produces a 10-tier limit-price bid curve for each of the 24 operating hours of the next day, sized by a Bayesian-Kelly framework over a probabilistic DART-spread forecast, with a solar-curtailment hedge overlay that adds INC virtuals when the posterior implies RT will go deeply negative.
 
 **The system does not submit bids to ERCOT.** It writes a CSV that a human/QSE reviews and submits. Do not add any submission logic.
 
@@ -31,6 +31,7 @@ These are pinned in `pyproject.toml`. Do not swap them for "modern alternatives"
 | Volatility | `arch` | Whitepaper-specified. Standard GARCH implementation; `statsmodels` ARCH is buggier |
 | Bayesian inference | `PyMC` + `nutpie` sampler | Whitepaper-specified. `numpyro` is faster but the team's mental model is PyMC |
 | Backtesting | `vectorbt` | Whitepaper-specified. Vectorized speed matters for walk-forward |
+| ERCOT data feed | `gridstatus` (open-source) | Free, no API key. Pulls DAM/RTM SPPs, AS, load, wind/solar forecast, fuel mix from ERCOT public reports. Used for both training (LMP gap-fill) and inference (everything) |
 | Data store | Parquet via `pyarrow` | Columnar + range queries; no databases in v1 |
 | Dataframes | `polars` for ingestion, `pandas` for modeling | Polars is faster for joins; PyMC ergonomics still favor pandas |
 | Config | YAML via `pydantic-settings` | Type-checked configs prevent silent misconfiguration |
@@ -125,6 +126,9 @@ uv run python -m src.ingest.ercot --year 2025
 4. **Parquet partitioning:** `data/processed/<dataset>/year=<YYYY>/month=<MM>/data.parquet`
 5. **Schema migrations:** changes to processed Parquet require a `data/processed/SCHEMA.md` entry and a re-ingest script.
 6. **Settlement Type semantics for fuel mix data:** `FINAL` is true once-and-for-all. `INITIAL` is preliminary and *will* be overwritten on re-ingest. Tag and version both.
+7. **Training data lives in `data/raw/local/`** (user's uploaded files, immutable). **Live/inference data lives in `data/cache/gridstatus/`** (fetched on demand, can be deleted and re-pulled). Never mix them in the same Parquet file without an explicit `source` column.
+8. **Every fetched gridstatus result is cached.** Use `joblib` or `diskcache` keyed by (method, start, end, locations). Reruns of the daily script must not re-pull data already in cache. Cache invalidation is manual via `python -m src.ingest.live.invalidate_cache`.
+9. **Vintage tracking for inference data is mandatory.** Every gridstatus call records the `publish_time` (or pull timestamp if unavailable) into a sidecar JSON. This is what proves walk-forward compliance.
 
 ---
 
@@ -142,7 +146,7 @@ These come from Jonathan's `alpha-signal-validator` skill. Violations are blocki
 ## Things NOT to do (in order of severity)
 
 1. **Do not write code that submits bids to ERCOT.** v1 is human-in-the-loop. Submission is an entirely separate workstream with separate governance.
-2. **Do not hard-code the target node name.** Read it from `config/nodes.yaml`. The name is provisional (see PRD §3) and *will* change.
+2. **Do not hard-code the target node name.** Read it from `config/nodes.yaml`. The current node is `RN_QTUM_SLR`, but the framework must remain node-agnostic for v2 multi-node expansion.
 3. **Do not bypass the walk-forward boundary.** Any feature that uses RTM data to predict the same day's DAM is a bug, even if it improves metrics. Especially if it improves metrics.
 4. **Do not use synthetic prices in backtests.** See compliance rules.
 5. **Do not skip the Half-Kelly damping.** Full-Kelly sizing is mathematically correct for known distributions and operationally catastrophic for forecasted ones. The 0.5 multiplier is non-negotiable.

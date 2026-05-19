@@ -1,30 +1,76 @@
-# Target node configuration.
-# DO NOT hard-code the settlement-point name anywhere in src/.
-# All code reads from this file or the TARGET_NODE env var.
-#
-# Action required (Phase 0 open question #1):
-#   Confirm `ercot_settlement_point` by pulling NP4-160-SG Settlement Points
-#   List from ERCOT MIS. Filter RESOURCE_NAME for: QUANTUM, QTUM, SOLACE, IPQ.
-#   Update `confirmed: false` → true once verified.
+# Target node configuration — confirmed 2026-05-18
+# ERCOT-registered name: RN_QTUM_SLR
+# Read from this file in all src/ code. Never hard-code the node name.
 
 target_node:
-  working_label: QUANTUM_ESR            # provisional; NOT verified
-  ercot_settlement_point: QUANTUM_ESR   # replace with exact ERCOT name after confirmation
-  confirmed: false                      # set to true after NP4-160-SG lookup
-  settlement_point_type: RN             # Resource Node
-  zone: NORTH                           # primary zone; node borders WEST zone
-  latitude: 33.18                       # Haskell County TX approx centroid
-  longitude: -99.73
-  capacity_mw: 321.79
-  fuel_type: BESS
-  ercot_queue_id: 26INR0309
-  cod_projected: 2026-06-01             # Commercial Operations Date; may slip
-  notes: >
-    IP Quantum BESS LLC — "Solace Storage" project, Haskell County TX.
-    Node straddles the North/West zone boundary; price typically tracks NORTH.
-    Confirm zone affiliation before Phase 1 trading.
+  ercot_settlement_point: RN_QTUM_SLR        # confirmed — do not change without re-running Phase 1
+  confirmed: true                             # set to true after NP4-160-SG confirmed (done 2026-05-18)
+  settlement_point_type: RN                   # Resource Node
+  resource_type: solar                        # _SLR suffix per ERCOT naming convention
+  zone: WEST                                  # ERCOT West Zone (West Texas)
+  installed_mw: 160.0                         # nameplate PV capacity — caps M11 curtailment hedge
+  note: >
+    RN_QTUM_SLR is the solar-only resource node. The IP Quantum BESS battery
+    project (queue 26INR0309, Haskell County) is a separate node and separate
+    workstream. Do not assume they share a settlement point.
 
-# Neighboring nodes used for HMM regime features (shift-factor proxy)
-# Add confirmed names here once NP4-160-SG is pulled.
-reference_hub: HB_NORTH                 # nearest hub for hub-spoke spread
-neighboring_nodes: []
+# Reference hubs for basis decomposition and proxy pricing
+# Used when RN_QTUM_SLR history is < 90 days (backtest proxies to HB_WEST)
+reference_hub: HB_WEST
+system_hub: HB_HUBAVG
+
+# Solar curtailment hedge parameters (M11)
+# hedge_mw = min(pv_forecast_mw × coverage_ratio, installed_mw, max_position_mw)
+curtailment_hedge:
+  enabled: true
+  trigger_prob: 0.30               # P(RT_LMP < rec_floor) threshold to activate hedge
+  coverage_ratio: 0.80             # fraction of forecast PV output to hedge
+  rec_floor_usd: -5.0              # below this RT LMP, operator curtails; hedge activates
+  direction: INC                   # always INC (sell DAM / buy RT) — NOT DEC (see PRD §M11)
+
+# West Texas weather stations for ASOS temperature data
+# Source: Iowa State Mesonet ASOS archive (free, no auth)
+weather_stations:
+  - station: MAF
+    name: Midland-Odessa International
+    lat: 31.94
+    lon: -102.20
+    zone: WEST
+    primary: true                  # closest to RN_QTUM_SLR site
+  - station: LBB
+    name: Lubbock Preston Smith International
+    lat: 33.66
+    lon: -101.82
+    zone: WEST
+    primary: false
+  - station: SJT
+    name: San Angelo Regional
+    lat: 31.36
+    lon: -100.50
+    zone: WEST
+    primary: false
+  # Additional stations for zone-level features
+  - station: DFW
+    name: Dallas-Fort Worth International
+    lat: 32.90
+    lon: -97.04
+    zone: NORTH
+    primary: false
+  - station: HOU
+    name: Houston-Hobby
+    lat: 29.65
+    lon: -95.28
+    zone: HOUSTON
+    primary: false
+  - station: AUS
+    name: Austin-Bergstrom International
+    lat: 30.19
+    lon: -97.67
+    zone: SOUTH
+    primary: false
+  - station: SAT
+    name: San Antonio International
+    lat: 29.53
+    lon: -98.47
+    zone: SOUTH
+    primary: false

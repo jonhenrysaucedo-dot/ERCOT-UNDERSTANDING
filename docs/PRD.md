@@ -1,4 +1,4 @@
-# PRD — ERCOT DART Trading Strategy for `QUANTUM_ESR` (West Texas)
+# PRD — ERCOT DART Trading Strategy for `RN_QTUM_SLR` (West Texas Solar)
 
 **Owner:** Jonathan
 **Status:** Draft v1.0 — Phase 0 not started
@@ -9,7 +9,7 @@
 
 ## 0. TL;DR
 
-Build a Python system that submits Day-Ahead Market virtual bids and PTP Obligations for a single ERCOT resource node (a battery storage facility associated with IP Quantum BESS, exact ERCOT-registered settlement-point name **TBD**, see §10). Bids are sized by a Bayesian-Kelly framework and structured as 10-tier limit curves — never as price-taker blocks.
+Build a Python system that submits Day-Ahead Market virtual bids and PTP Obligations against a single ERCOT solar resource node — **`RN_QTUM_SLR`** — located in West Texas. Bids are sized by a Bayesian-Kelly framework and structured as 10-tier limit curves — never as price-taker blocks. A separate solar-curtailment hedge overlay (financial INCs that profit when RT goes deeply negative) protects the physical revenue stream.
 
 The system is **not** a live execution engine in v1. v1 produces a daily CSV of bids that a human (or QSE) reviews and submits manually. Automated submission is out of scope.
 
@@ -36,10 +36,10 @@ This PRD operationalizes that design for a single node and a single trading day 
 ## 2.1 Non-goals (explicit out-of-scope for v1)
 
 - ❌ Automated bid submission to ERCOT (manual paste by QSE only)
-- ❌ Multi-node portfolio optimization (one node at a time)
+- ❌ Multi-node portfolio optimization (one node at a time; the wind and battery sides of Jonathan's portfolio are separate workstreams)
 - ❌ Real-time intraday re-bidding (DAM-only workflow)
 - ❌ Ancillary service capacity bidding (energy + PTP only)
-- ❌ Battery state-of-charge co-optimization (treat physical battery as fixed reference; financial trades only)
+- ❌ Physical PV dispatch decisions (the strategy generates *financial* trades only; physical curtailment is the operator's call, though the curtailment hedge in §M11 makes the financial overlay)
 - ❌ DRO/CVaR alternative implementation (compared and rejected in whitepaper)
 
 ---
@@ -48,11 +48,13 @@ This PRD operationalizes that design for a single node and a single trading day 
 
 | Field | Value |
 |---|---|
-| Provisional name | `QUANTUM_ESR` (working label, **NOT verified**) |
-| Best public match | IP Quantum BESS, LLC — "Solace Storage" (321.79 MW BESS, Haskell County, TX, ERCOT queue `26INR0309`, COD projected Jun 2026) |
-| Geographic zone | ERCOT North Zone (Haskell County borders the West Zone) |
-| Settlement-point type | Resource Node (`RN`) |
-| **Action required (Phase 0)** | Confirm the ERCOT-registered settlement-point name by pulling the `NP4-160-SG` Settlement Points List from the ERCOT MIS. Until confirmed, all code must reference the node via the env var `TARGET_NODE`, never a hard-coded string. |
+| ERCOT-registered name | **`RN_QTUM_SLR`** (confirmed) |
+| Settlement-point type | Resource Node (`RN_` prefix) |
+| Resource type | Solar PV (`_SLR` suffix per ERCOT naming convention) |
+| Installed PV nameplate | **160 MW** (confirmed 2026-05-18) |
+| Geographic zone | ERCOT West Zone (West Texas) |
+| Note | The "QTUM" stem may share branding/site with the unrelated IP Quantum BESS battery project (queue `26INR0309`, Haskell County). Do not assume they share a settlement point. This PRD scopes only `RN_QTUM_SLR`. |
+| Code reference | Read from `config/nodes.yaml`, never hard-coded. The config additionally lists the West Zone Hub (`HB_WEST`) and ERCOT system-wide hub (`HB_HUBAVG`) for basis-decomposition use. |
 
 ---
 
@@ -150,9 +152,17 @@ Constraint: ERCOT requires monotonic price/quantity pairs. Validate before write
 
 ### M10 — Daily bid runner (`src/runners/daily.py`)
 - CLI entrypoint: `python -m runners.daily --as-of 2026-05-19`
-- Pulls latest features, runs M3 → M4 → M5 → M6 → M7 → M8
+- Pulls latest features, runs M3 → M4 → M5 → M6 → M7 → M8 → M11
 - Writes `output/bids_YYYYMMDD.csv` + `output/audit_YYYYMMDD.json`
-- Logs every input feature value, the regime probabilities, Kelly fraction pre/post damping, and the tier curve.
+- Logs every input feature value, the regime probabilities, Kelly fraction pre/post damping, the tier curve, and any hedge overlay applied.
+
+### M11 — Solar curtailment hedge overlay (`src/execution/curtail_hedge.py`)
+The physical PV asset earns negative revenue any RT interval where the node price is below the REC value (about -$5/MWh). Below that threshold the operator curtails the array, *losing* the would-be physical revenue. A financial INC bid at the same node profits when DA > RT — exactly the condition that triggers physical curtailment — and thus offsets the lost physical revenue.
+
+- **Trigger:** for any hour where the posterior P(RT_LMP < REC_floor) > `hedge_trigger_prob` (default 0.30, configurable in `config/risk.yaml`)
+- **Sizing:** `hedge_mw = min(PV_forecast_mw × hedge_coverage_ratio, installed_pv_mw_nameplate, max_position_mw)`. Default `hedge_coverage_ratio = 0.8`. The installed nameplate is **160 MW**, so the hedge can never exceed 160 MW (you cannot lose more physical revenue than the array can produce). The risk-config `max_position_mw` may further cap below 160.
+- **Direction:** always INC (sell DAM / buy RT). The Composite-Kelly direction from M6 is overridden — if Kelly says DEC and hedge says INC, the hedge wins for the hedge_mw portion. Remaining capacity (max_position − hedge_mw) may still run a Kelly direction.
+- **Critical logic check:** the whitepaper §2 originally stated the hedge uses DEC bids. **This is an error** — a DEC (buy DAM / sell RT) amplifies loss when RT plunges negative, it does not hedge it. The implementation uses INC and ignores the whitepaper on this single point. This was caught during the Excel-workbook prototype phase and is documented in `output/audit_*.json` as `hedge_direction_override=true`.
 
 ---
 
@@ -207,7 +217,7 @@ quantum_dart/
 
 | Phase | Scope | Acceptance | Estimated effort |
 |---|---|---|---|
-| **0. Confirm & acquire** | Verify ERCOT-registered node name; pull missing data sources (LMP, 60-Day Disclosure, wind forecast, weather) | `data/raw/` contains all sources in §M1; `config/nodes.yaml` has confirmed node name | 1–2 weeks (bottleneck: ERCOT MIS approval if not already in hand) |
+| **0. Acquire missing data** | Pull the six missing data sources (LMP, 60-Day Disclosure, wind forecast, weather). Node name already confirmed (`RN_QTUM_SLR`). | `data/raw/` contains all sources in §M1; `config/nodes.yaml` populated with `RN_QTUM_SLR` + neighboring nodes + `HB_WEST` hub | 1–2 weeks (bottleneck: ERCOT MIS approval if not already in hand) |
 | **1. Ingest** | Build M1; produce a clean Parquet store | `pytest tests/ingest/` green; one DataFrame per source, joinable on `(node, interval_start_utc)` | 1 week |
 | **2. Features** | Build M2; all features computable from historical data | Feature matrix for 2024–2025 produced; walk-forward boundary respected (tested) | 1 week |
 | **3. Models** | Build M3 (HMM), M4 (GARCH), M5 (PyMC) | Each model trains on 2024 data and produces sensible predictions on Jan 2025 holdout. Posterior credible intervals contain truth ≥85% of the time | 2–3 weeks |
@@ -221,7 +231,7 @@ quantum_dart/
 
 ## 8. Risks & failure modes
 
-1. **Node never gets confirmed or never energizes.** Quantum BESS / Solace's COD was projected June 2026. If physical interconnection slips, there's no resource node to trade. Mitigation: framework should work for any West/North zone resource node — make the target node a config parameter, not a hard-coded constant.
+1. **Node energization timing.** `RN_QTUM_SLR` is a confirmed registered node, but if the physical PV is not yet commercially operational at run time, the node may have very thin historical price history. Mitigation: backtest on the West Zone hub (`HB_WEST`) as a proxy until at least 90 days of `RN_QTUM_SLR` settlements exist.
 2. **60-Day Disclosure unavailable.** Without it, the backtest can only use top-of-book DAM prices and no slippage model. The strategy is still runnable as a forward paper trade, but historical alpha cannot be validated rigorously. Mitigation: document this as a known gap and proceed with paper trading only until disclosure data is in hand.
 3. **RTC+B regime change invalidates pre-Dec-2025 training data.** The whitepaper flags this explicitly. Mitigation: HMM training window starts no earlier than Dec 2025 once 6+ months of post-RTC+B data exists. Until then, use 2023–2025 with a regime-aware indicator.
 4. **PyMC sampling too slow for 24-hour daily run.** Mitigation: `nutpie` backend; if still too slow, fall back to variational inference (`pm.fit()`) which trades calibration for speed.
@@ -240,8 +250,62 @@ quantum_dart/
 
 ## 10. Open questions (must resolve before Phase 1)
 
-1. **What is the exact ERCOT-registered settlement-point name for the target node?** Action: Jonathan or QSE pulls `NP4-160-SG` from ERCOT MIS, filters by `RESOURCE_NAME` containing "QUANTUM" or "QTUM" or "SOLACE" or "IPQ", and confirms.
+1. ~~What is the exact ERCOT-registered settlement-point name for the target node?~~ ✅ **Resolved 2026-05-18 — `RN_QTUM_SLR`.**
 2. **What is the trader's capital allocation for this strategy?** Drives the `max_position_mw` in `config/risk.yaml`.
 3. **Does the QSE support 10-tier curve trades on virtuals, or only block trades?** If only blocks, M8 degrades to a 1-tier output and a different sizing logic is needed.
-4. **Is the target node already energized as of the run date?** A valid-but-not-energized node will fail ERCOT pre-trade validation.
-5. **Is the trader running ancillary service co-bids on this node?** If yes, M10's bid generator must reserve battery capacity for AS, reducing the financial trade size. Out of scope for v1 per §2.1, but flag for v2.
+4. ~~What is the installed PV nameplate at `RN_QTUM_SLR`?~~ ✅ **Resolved 2026-05-18 — 160 MW.** Cap on §M11 curtailment hedge sizing.
+5. **Are wind or battery resources co-located at the same physical site, even if they settle to different nodes?** Co-location affects basis behavior and may warrant a multi-node v2.
+6. **Does the operator already have a hedge or PPA on the physical PV revenue?** If yes, the curtailment-hedge overlay (§M11) would double-count and must be disabled. Confirm before any live trading.
+
+---
+
+## 11. Data sourcing strategy (training vs. inference)
+
+This system has two distinct data needs that must use compatible sources to avoid training-serving skew.
+
+### Training corpus (one-time + monthly refit)
+The model is fit on a multi-year history. Sources:
+
+- **Local uploaded files** (in `data/raw/local/`) — Native Load, Hourly Wind/Solar Actual, DAM AS MCPC, IntGenbyFuel, PVGRPP snapshots. These are the canonical training feed for fields we already have.
+- **`gridstatus` Python library** (open-source, free, no API key) — fills the LMP gap. Pull `get_spp(market='DAM_HOURLY')` and `get_spp(market='REAL_TIME_15_MIN')` for `RN_QTUM_SLR`, `HB_WEST`, `HB_HUBAVG` for the same date range as local data.
+- **60-Day DAM Disclosure** — pulled via `gridstatus` or directly from ERCOT's public archive (`https://data.ercot.com/data-product-archive/NP3-966-ER`). Used for the M9 backtester's bid-stack reconstruction. **Free public data — no QSE access required.**
+- **Weather** — Iowa State ASOS archive (free, no auth).
+
+### Reconciliation check (mandatory before declaring Phase 1 done)
+For every field that overlaps between local files and `gridstatus`, run a row-level diff:
+
+- Load by zone, 2024-01-01 through 2025-12-31
+- Wind generation, same window
+- Solar generation, same window
+- AS prices (RegUp, RegDn, RRS, NSpin, ECRS), same window
+- Fuel mix (Coal, Gas, Gas-CC, Wind, Solar, Nuclear)
+
+**Pass criterion:** ≥99% of hourly observations match within 0.5% relative tolerance. Discrepancies logged to `reports/reconciliation_YYYY-MM-DD.html` with row counts, max delta, and a sample of mismatched rows. Failing this check is a Phase 1 blocker.
+
+If reconciliation passes, the two sources are interchangeable, and we can safely train on local and infer on `gridstatus`.
+
+### Inference (every daily run)
+The daily runner at 08:00 CT pulls **everything from `gridstatus` plus ERCOT public endpoints**:
+
+| Feature | Source method |
+|---|---|
+| Day-ahead load forecast | `gridstatus.Ercot().get_load_forecast()` |
+| Day-ahead wind forecast (STWPF/WGRPP) | `gridstatus.Ercot().get_wind_forecast()` |
+| Day-ahead solar forecast (PVGRPP) | `gridstatus.Ercot().get_solar_forecast()` |
+| Recent DAM SPP (lagged features) | `gridstatus.Ercot().get_spp(market='DAM_HOURLY')` |
+| Recent RTM SPP (lagged features) | `gridstatus.Ercot().get_spp(market='REAL_TIME_15_MIN')` |
+| AS MCPC (most recent close) | `gridstatus.Ercot().get_as_prices()` |
+| Current fuel mix (regime check) | `gridstatus.Ercot().get_fuel_mix()` |
+| Capacity on outage (fundamental proxy) | `gridstatus.Ercot().get_capacity_committed()` |
+| Weather observations (last 24h) | ASOS request to mesonet.agron.iastate.edu |
+
+**Critical walk-forward constraint:** every inference pull must use the data vintage that existed at or before the DAM submission deadline (10:00 CT prior day). Use `gridstatus`'s `publish_time` parameter where available; for endpoints without it, snap to the closest hourly publication. Document the vintage in `output/audit_YYYYMMDD.json`.
+
+### Why not use `gridstatus` for training too?
+We could. The reason for the local-first design is auditability and reproducibility. The local files are immutable historical snapshots that won't change if `gridstatus` updates its parsing or ERCOT corrects a price retroactively. If a regulator or auditor ever asks "what data did you train on?" — pointing to a vendored copy of ERCOT-shipped files is stronger than pointing to a 2026 `gridstatus` pull. After reconciliation passes, this is belt-and-suspenders, but the belts are cheap.
+
+### Dependencies
+Add to `pyproject.toml`:
+- `gridstatus >= 0.30.0`
+- `requests` (for direct ERCOT archive fetches)
+- No ERCOT API credentials required for v1. (`gridstatus`'s open-source library scrapes the public ERCOT MIS. Their hosted API at `gridstatus.io` has tighter rate limits on the free tier but we don't need it.)
