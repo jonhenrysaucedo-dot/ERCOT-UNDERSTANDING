@@ -1,0 +1,26 @@
+# Risk limits — override all model output.
+# These are hard caps, not soft suggestions (CLAUDE.md §5).
+
+# ── Position sizing ───────────────────────────────────────────────────────────
+half_kelly_multiplier: 0.50        # Non-negotiable per PRD §M7 and CLAUDE.md §"Do not skip"
+max_position_mw: 50.0              # TBD: replace with trader's capital allocation (PRD §10 Q2); node nameplate is 160 MW
+min_tier_mw: 0.1                   # ERCOT minimum offer block
+
+# ── Uncertainty damping ───────────────────────────────────────────────────────
+# Multiply Kelly f* by 0.5 if posterior credible interval width / |E[spread]| > this threshold.
+uncertainty_damp_threshold: 1.0
+
+# ── Correlation haircut ───────────────────────────────────────────────────────
+# Scale f* by (1 - max_pairwise_correlation) across same-day hours.
+correlation_haircut_enabled: true
+
+# ── Tail-event hard stop ──────────────────────────────────────────────────────
+# Absolute MW ceiling regardless of Kelly output.
+# Set lower than max_position_mw to create a buffer for stress scenarios.
+hard_mw_ceiling: 50.0
+
+# ── ERCOT offer constraints ───────────────────────────────────────────────────
+price_cap_usd_per_mwh: 5000.0      # ERCOT system-wide offer cap
+price_floor_usd_per_mwh: -250.0    # ERCOT system-wide offer floor
+num_offer_tiers: 10
+max_offer_ids_per_node: 35         # ERCOT limit on simultaneous offer IDs

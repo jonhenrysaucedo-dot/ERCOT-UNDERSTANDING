@@ -1,0 +1,10 @@
+# Exclude raw data files — store externally or via DVC
+raw/**/*.xlsx
+raw/**/*.csv
+raw/**/*.zip
+raw/**/*.parquet
+
+# Keep directory structure
+!raw/.gitkeep
+!processed/.gitkeep
+!cache/.gitkeep
